@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avances FabLab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; transition: background-color 0.3s, color 0.3s; }
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Tema Claro */
+        :root { --bg: #ffffff; --text: #111827; --card: #f9fafb; --border: #e5e7eb; --accent: #000000; --accentText: #ffffff; --muted: #6b7280; }
+        /* Tema Oscuro */
+        .dark { --bg: #0a0a0a; --text: #f3f4f6; --card: #171717; --border: #262626; --accent: #ffffff; --accentText: #000000; --muted: #9ca3af; }
+        
+        body { background-color: var(--bg); color: var(--text); }
+        .bg-card { background-color: var(--card); }
+        .border-theme { border-color: var(--border); }
+        .text-muted { color: var(--muted); }
+        .bg-accent { background-color: var(--accent); color: var(--accentText); }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Utilidades para ocultar/mostrar */
+        .hidden-view { display: none !important; }
+        .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+    <!-- Notificaciones -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 px-6 py-3 rounded-xl shadow-2xl font-bold flex items-center gap-3 hidden-view" style="background-color: var(--text); color: var(--bg);">
+        <i class="ph ph-info text-2xl"></i> <span id="toast-msg"></span>
+    </div>
+
+    <!-- Cabecera -->
+    <header class="sticky top-0 z-40 border-b border-theme shadow-sm backdrop-blur-md bg-opacity-90" style="background-color: var(--bg);">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3 cursor-pointer hover:opacity-70" onclick="showView('dashboard')">
+                <i class="ph ph-hexagon text-3xl"></i>
+                <h1 id="site-title" class="font-bold text-xl">Avances FabLab</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button onclick="toggleTheme()" class="p-2 border border-theme rounded-full hover:opacity-70"><i class="ph ph-moon" id="theme-icon"></i></button>
+                <div id="auth-controls"></div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-6 py-10" id="main-content">
+        <!-- Las vistas se inyectarán aquí mediante JavaScript -->
+    </main>
+
+    <script>
+        // --- ESTADO GLOBAL ---
+        const PIN = "fablab2026";
+        let isMember = sessionStorage.getItem('fab_auth') === 'yes';
+        let projects = JSON.parse(localStorage.getItem('fab_data') || '[]');
+        let currentProject = null;
+
+        // Inicialización
+        if(localStorage.getItem('fab_dark') === 'true') document.body.classList.add('dark');
+        document.getElementById('theme-icon').className = document.body.classList.contains('dark') ? 'ph ph-sun' : 'ph ph-moon';
+        document.getElementById('site-title').textContent = localStorage.getItem('fab_title') || "Avances FabLab";
+        
+        renderHeader();
+        showView('dashboard');
+
+        // --- FUNCIONES ÚTILES ---
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            toast.classList.remove('hidden-view');
+            toast.classList.add('fade-in');
+            setTimeout(() => toast.classList.add('hidden-view'), 4000);
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            const isDark = document.body.classList.contains('dark');
+            localStorage.setItem('fab_dark', isDark);
+            document.getElementById('theme-icon').className = isDark ? 'ph ph-sun' : 'ph ph-moon';
+        }
+
+        function saveProjects() {
+            try {
+                localStorage.setItem('fab_data', JSON.stringify(projects));
+            } catch(e) { showToast("🚨 Memoria llena. Reduce imágenes."); }
+        }
+
+        function renderHeader() {
+            const controls = document.getElementById('auth-controls');
+            if (isMember) {
+                controls.innerHTML = `
+                    <button onclick="showView('settings')" class="text-sm font-semibold hover:opacity-70 flex items-center gap-2"><i class="ph ph-gear"></i> Ajustes</button>
+                    <button onclick="logout()" class="text-sm font-semibold hover:opacity-70 flex items-center gap-2 text-red-500"><i class="ph ph-sign-out"></i> Salir</button>
+                `;
+            } else {
+                controls.innerHTML = `<button onclick="showView('login')" class="flex items-center gap-2 text-sm font-bold px-4 py-2 border border-theme rounded-lg hover:opacity-70"><i class="ph ph-lock-key"></i> Editar</button>`;
+            }
+        }
+
+        function logout() {
+            isMember = false;
+            sessionStorage.removeItem('fab_auth');
+            renderHeader();
+            showView('dashboard');
+        }
+
+        // --- SISTEMA DE NAVEGACIÓN ---
+        function showView(viewName, data = null) {
+            const main = document.getElementById('main-content');
+            main.innerHTML = ''; // Limpiar vista
+            main.className = 'max-w-6xl mx-auto p-6 py-10 fade-in';
+
+            if (viewName === 'dashboard') renderDashboard(main);
+            else if (viewName === 'login') renderLogin(main);
+            else if (viewName === 'detail') { currentProject = data; renderDetail(main); }
+            else if (viewName === 'editor') renderEditor(main, data);
+            else if (viewName === 'settings') renderSettings(main);
+        }
+
+        // --- VISTAS ---
+        function renderLogin(container) {
+            container.innerHTML = `
+                <div class="flex flex-col items-center py-20">
+                    <button onclick="showView('dashboard')" class="text-muted mb-8 hover:opacity-70 font-semibold flex items-center gap-2"><i class="ph ph-arrow-left"></i> Volver</button>
+                    <div class="max-w-xs w-full text-center">
+                        <h2 class="text-2xl font-bold mb-2">Acceso a Miembros</h2>
+                        <p class="text-muted text-sm mb-8">Ingresa el PIN para editar.</p>
+                        <input type="password" id="pin-input" placeholder="Contraseña..." class="w-full text-center text-2xl tracking-widest bg-transparent border-b-2 border-theme py-2 focus:outline-none mb-4" />
+                        <p id="pin-error" class="text-red-500 text-sm font-bold hidden-view mb-4">PIN Incorrecto</p>
+                        <button onclick="checkPin()" class="w-full py-3 rounded-lg font-bold shadow-md bg-accent">Entrar</button>
+                    </div>
+                </div>
+            `;
+        }
+        function checkPin() {
+            if (document.getElementById('pin-input').value === PIN) {
+                isMember = true;
+                sessionStorage.setItem('fab_auth', 'yes');
+                renderHeader();
+                showView('dashboard');
+                showToast("Acceso concedido");
+            } else {
+                document.getElementById('pin-error').classList.remove('hidden-view');
+            }
+        }
+
+        function renderDashboard(container) {
+            let html = `
+                <div class="flex flex-wrap justify-between items-center gap-4 mb-10 border-b border-theme pb-4">
+                    <h2 class="text-3xl font-bold">Welcome</h2>
+                    ${isMember ? `<button onclick="showView('editor')" class="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold shadow hover:opacity-90 bg-accent"><i class="ph ph-plus-circle text-xl"></i> Nuevo Proyecto</button>` : ''}
+                </div>
+            `;
+
+            if (projects.length === 0) {
+                html += `
+                    <div class="text-center py-24 border-2 border-dashed border-theme rounded-2xl text-muted">
+                        <i class="ph ph-folder-dashed text-6xl mx-auto mb-4 opacity-50"></i>
+                        <p class="text-xl font-medium">Aún no hay proyectos subidos.</p>
+                    </div>`;
+            } else {
+                html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">`;
+                projects.forEach((p, idx) => {
+                    let mediaHTML = `<div class="w-full h-full flex items-center justify-center opacity-20"><i class="ph ph-image text-6xl"></i></div>`;
+                    if (p.mediaType === 'image' && p.media) mediaHTML = `<img src="${p.media}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />`;
+                    else if (p.mediaType === 'video' && p.media) mediaHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-black/80 text-white"><i class="ph ph-play-circle text-5xl opacity-80"></i><span class="text-xs mt-2 opacity-60">Video</span></div>`;
+
+                    let controlsHTML = isMember ? `
+                        <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-black/70 rounded-lg p-1.5">
+                            <button onclick="event.stopPropagation(); moveProj(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="p-1 text-white hover:bg-white/20 rounded disabled:opacity-30"><i class="ph ph-caret-left"></i></button>
+                            <button onclick="event.stopPropagation(); moveProj(${idx}, 1)" ${idx === projects.length - 1 ? 'disabled' : ''} class="p-1 text-white hover:bg-white/20 rounded disabled:opacity-30"><i class="ph ph-caret-right"></i></button>
+                        </div>` : '';
+
+                    html += `
+                        <div class="group relative rounded-2xl overflow-hidden border border-theme shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col cursor-pointer bg-card" onclick='showView("detail", ${JSON.stringify(p)})'>
+                            <div class="h-56 relative overflow-hidden bg-black/5">${mediaHTML}</div>
+                            <div class="p-6 flex flex-col flex-1 relative">
+                                <h3 class="font-bold text-2xl mb-2">${p.title}</h3>
+                                <p class="text-sm line-clamp-3 mb-6 flex-1 text-muted">${p.desc}</p>
+                                <div class="pt-4 border-t border-theme flex justify-between items-center mt-auto">
+                                    <span class="text-xs font-bold uppercase tracking-wider text-muted">${p.date}</span>
+                                    <span class="text-sm font-bold flex items-center" style="color: var(--accent)">Ver más <i class="ph ph-arrow-right ml-1"></i></span>
+                                </div>
+                            </div>
+                            ${controlsHTML}
+                        </div>`;
+                });
+                html += `</div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function moveProj(idx, dir) {
+            if (idx + dir < 0 || idx + dir >= projects.length) return;
+            [projects[idx], projects[idx+dir]] = [projects[idx+dir], projects[idx]];
+            saveProjects();
+            showView('dashboard');
+        }
+
+        function renderDetail(container) {
+            let mediaHTML = '';
+            if (currentProject.mediaType === 'image' && currentProject.media) mediaHTML = `<img src="${currentProject.media}" class="w-full rounded-2xl mb-12 shadow-lg object-cover max-h-[70vh]" />`;
+            if (currentProject.mediaType === 'video' && currentProject.media) mediaHTML = `<div class="mb-12 rounded-2xl overflow-hidden shadow-lg border border-theme"><a href="${currentProject.media}" target="_blank" class="flex flex-col items-center justify-center p-12 bg-black/5 hover:bg-black/10"><i class="ph ph-link-simple text-5xl mb-4"></i><span class="font-bold text-lg">Abrir enlace de video</span></a></div>`;
+
+            let subsHTML = '';
+            if (currentProject.subs && currentProject.subs.length > 0) {
+                subsHTML = `<div class="space-y-4"><h2 class="text-2xl font-bold mb-6 flex items-center border-b border-theme pb-4"><i class="ph ph-stack mr-3"></i> Fases del Proyecto</h2>`;
+                currentProject.subs.forEach((sub, i) => {
+                    let subMedia = '';
+                    if (sub.mediaType === 'image' && sub.media) subMedia = `<img src="${sub.media}" class="w-full rounded-xl shadow-md mb-6 object-cover" />`;
+                    if (sub.mediaType === 'video' && sub.media) subMedia = `<div class="mb-6 rounded-xl overflow-hidden shadow-md border border-theme"><a href="${sub.media}" target="_blank" class="flex items-center justify-center p-8 bg-black/5 font-bold hover:underline"><i class="ph ph-link-simple mr-2"></i> Ver video</a></div>`;
+                    
+                    subsHTML += `
+                    <div class="border border-theme rounded-2xl overflow-hidden shadow-sm bg-card">
+                        <button onclick="toggleAcc(${i})" class="w-full p-6 flex justify-between items-center text-left hover:opacity-70">
+                            <h3 class="font-bold text-xl flex items-center gap-4"><span class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-accent">${i + 1}</span> ${sub.title || `Fase ${i+1}`}</h3>
+                            <i class="ph ph-caret-down text-xl" id="icon-acc-${i}"></i>
+                        </button>
+                        <div id="acc-${i}" class="p-6 pt-2 border-t border-theme hidden-view">
+                            ${subMedia}
+                            <div class="whitespace-pre-wrap text-base leading-relaxed">${sub.content}</div>
+                        </div>
+                    </div>`;
+                });
+                subsHTML += `</div>`;
+            }
+
+            container.innerHTML = `
+                <div class="max-w-4xl mx-auto pb-20">
+                    <div class="flex flex-wrap justify-between items-center gap-4 mb-8">
+                        <button onclick="showView('dashboard')" class="text-muted flex items-center font-bold hover:opacity-70"><i class="ph ph-arrow-left mr-2"></i> Volver</button>
+                        ${isMember ? `
+                        <div class="flex gap-3 items-center">
+                            <button onclick='showView("editor", ${JSON.stringify(currentProject)})' class="px-4 py-2 border border-theme rounded-lg text-sm font-bold hover:opacity-70"><i class="ph ph-pencil-simple"></i> Editar</button>
+                            <button onclick="deleteProj('${currentProject.id}')" class="px-4 py-2 border border-red-500 rounded-lg text-sm font-bold text-red-500 hover:bg-red-50"><i class="ph ph-trash"></i> Borrar</button>
+                        </div>` : ''}
+                    </div>
+                    <h1 class="text-4xl md:text-5xl font-black mb-4 leading-tight">${currentProject.title}</h1>
+                    <p class="text-sm font-bold uppercase tracking-widest mb-10 text-muted">${currentProject.date}</p>
+                    ${mediaHTML}
+                    <div class="text-lg leading-relaxed mb-16 whitespace-pre-wrap font-medium">${currentProject.desc}</div>
+                    ${subsHTML}
+                </div>
+            `;
+        }
+
+        function toggleAcc(id) {
+            const el = document.getElementById(`acc-${id}`);
+            const icon = document.getElementById(`icon-acc-${id}`);
+            if(el.classList.contains('hidden-view')) { el.classList.remove('hidden-view'); icon.className = 'ph ph-caret-up text-xl'; }
+            else { el.classList.add('hidden-view'); icon.className = 'ph ph-caret-down text-xl'; }
+        }
+
+        function deleteProj(id) {
+            if(confirm("¿Seguro que deseas eliminar este proyecto?")) {
+                projects = projects.filter(p => p.id !== id);
+                saveProjects();
+                showToast("Proyecto eliminado");
+                showView('dashboard');
+            }
+        }
+
+        // --- EDITOR GLOBAL VARIABLES ---
+        let edData = { title: '', desc: '', mediaType: 'none', media: '', subs: [] };
+
+        function renderEditor(container, data) {
+            if (data) edData = JSON.parse(JSON.stringify(data)); // Clonar
+            else edData = { title: '', desc: '', mediaType: 'none', media: '', subs: [] };
+            
+            drawEditor();
+        }
+
+        function drawEditor() {
+            const container = document.getElementById('main-content');
+            
+            let subsHTML = '';
+            edData.subs.forEach((s, i) => {
+                subsHTML += `
+                <div class="p-6 border-2 border-theme rounded-2xl bg-card">
+                    <div class="flex justify-between items-center gap-4 mb-6 pb-4 border-b border-theme">
+                        <div class="flex items-center gap-3 flex-1">
+                            <span class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-black/5">${i+1}</span>
+                            <input oninput="edData.subs[${i}].title = this.value" value="${s.title}" placeholder="Título de la Fase" class="flex-1 text-xl font-bold bg-transparent border-none focus:outline-none" />
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="event.preventDefault(); moveSub(${i}, -1)" class="p-2 hover:bg-black/10 rounded"><i class="ph ph-caret-up"></i></button>
+                            <button onclick="event.preventDefault(); moveSub(${i}, 1)" class="p-2 hover:bg-black/10 rounded"><i class="ph ph-caret-down"></i></button>
+                            <button onclick="event.preventDefault(); edData.subs.splice(${i}, 1); drawEditor();" class="p-2 text-red-500 hover:bg-red-100 rounded"><i class="ph ph-trash"></i></button>
+                        </div>
+                    </div>
+                    <textarea oninput="edData.subs[${i}].content = this.value" placeholder="Contenido..." rows="3" class="w-full p-4 border border-theme rounded-xl bg-transparent mb-4 focus:outline-none">${s.content}</textarea>
+                    
+                    <div class="p-4 border border-theme rounded-xl bg-black/5">
+                        <div class="flex gap-4 mb-4">
+                            <label><input type="radio" name="stype_${i}" ${s.mediaType === 'none'?'checked':''} onchange="edData.subs[${i}].mediaType='none'; edData.subs[${i}].media=''; drawEditor();" /> Sin Archivo</label>
+                            <label><input type="radio" name="stype_${i}" ${s.mediaType === 'image'?'checked':''} onchange="edData.subs[${i}].mediaType='image'; drawEditor();" /> Imagen</label>
+                            <label><input type="radio" name="stype_${i}" ${s.mediaType === 'video'?'checked':''} onchange="edData.subs[${i}].mediaType='video'; drawEditor();" /> Video (URL)</label>
+                        </div>
+                        ${s.mediaType !== 'none' ? `
+                            <div class="flex flex-col gap-2">
+                                ${s.mediaType === 'image' ? `<input type="file" accept="image/*" onchange="processImg(this.files[0], (url)=>{edData.subs[${i}].media=url; drawEditor();})" class="mb-2 text-sm" />` : ''}
+                                <input type="text" oninput="edData.subs[${i}].media = this.value" value="${s.media}" placeholder="O pega URL externa" class="w-full p-2 border border-theme rounded bg-transparent text-sm focus:outline-none" />
+                                ${s.mediaType === 'image' && s.media ? `<img src="${s.media}" class="h-20 object-cover mt-2 rounded" />` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>`;
+            });
+
+            container.innerHTML = `
+                <div class="max-w-4xl mx-auto pb-20">
+                    <button onclick="showView('${currentProject ? 'detail' : 'dashboard'}')" class="text-muted flex items-center mb-8 font-bold hover:opacity-70"><i class="ph ph-x mr-2"></i> Cancelar</button>
+                    
+                    <form onsubmit="event.preventDefault(); saveEdData();" class="space-y-12">
+                        <div class="p-8 rounded-2xl border border-theme shadow-sm bg-card space-y-6">
+                            <h2 class="text-xl font-bold border-b border-theme pb-4"><i class="ph ph-article mr-2"></i> Detalles Principales</h2>
+                            <input required oninput="edData.title = this.value" value="${edData.title}" placeholder="Título del Proyecto..." class="w-full text-4xl font-black bg-transparent border-b-2 border-theme py-2 focus:outline-none" />
+                            <textarea required oninput="edData.desc = this.value" placeholder="Descripción general..." rows="4" class="w-full p-4 border border-theme rounded-xl bg-transparent focus:outline-none">${edData.desc}</textarea>
+
+                            <div class="p-5 border border-theme rounded-xl bg-black/5">
+                                <label class="font-bold text-sm mb-4 block"><i class="ph ph-image"></i> Portada Principal</label>
+                                <div class="flex gap-6 mb-4">
+                                    <label><input type="radio" name="mtype" ${edData.mediaType === 'none'?'checked':''} onchange="edData.mediaType='none'; edData.media=''; drawEditor();" /> Ninguna</label>
+                                    <label><input type="radio" name="mtype" ${edData.mediaType === 'image'?'checked':''} onchange="edData.mediaType='image'; drawEditor();" /> Imagen</label>
+                                    <label><input type="radio" name="mtype" ${edData.mediaType === 'video'?'checked':''} onchange="edData.mediaType='video'; drawEditor();" /> Video (URL)</label>
+                                </div>
+                                ${edData.mediaType !== 'none' ? `
+                                    <div class="flex flex-col gap-2 p-4 bg-card border border-theme rounded-lg">
+                                        ${edData.mediaType === 'image' ? `<input type="file" accept="image/*" onchange="processImg(this.files[0], (url)=>{edData.media=url; drawEditor();})" class="mb-2 text-sm" />` : ''}
+                                        <input type="text" oninput="edData.media = this.value" value="${edData.media}" placeholder="O pega URL externa" class="w-full p-2 border border-theme rounded bg-transparent text-sm focus:outline-none" />
+                                        ${edData.mediaType === 'image' && edData.media ? `<img src="${edData.media}" class="h-32 object-cover mt-2 rounded" />` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+
+                        <div class="space-y-6 pt-6">
+                            <h2 class="text-2xl font-bold border-b border-theme pb-4"><i class="ph ph-stack mr-2"></i> Fases (${edData.subs.length})</h2>
+                            ${subsHTML}
+                            <button type="button" onclick="edData.subs.push({title:'', content:'', mediaType:'none', media:''}); drawEditor();" class="w-full py-6 border-2 border-dashed border-theme rounded-2xl font-bold flex flex-col items-center gap-2 hover:opacity-70 text-muted">
+                                <i class="ph ph-plus-circle text-3xl"></i> Añadir Fase
+                            </button>
+                        </div>
+
+                        <div class="sticky bottom-6 flex justify-end pt-6 border-t border-theme" style="background-color: var(--bg);">
+                            <button type="submit" class="px-8 py-4 rounded-xl text-lg font-bold shadow-xl hover:opacity-90 bg-accent"><i class="ph ph-floppy-disk mr-2"></i> Guardar Proyecto</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
+
+        function moveSub(i, dir) {
+            if (i + dir < 0 || i + dir >= edData.subs.length) return;
+            [edData.subs[i], edData.subs[i+dir]] = [edData.subs[i+dir], edData.subs[i]];
+            drawEditor();
+        }
+
+        function processImg(file, cb) {
+            if (!file || !file.type.startsWith('image/')) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height, MAX = 600;
+                    if(w>h && w>MAX){h*=MAX/w;w=MAX;} else if(h>MAX){w*=MAX/h;h=MAX;}
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    cb(canvas.toDataURL('image/jpeg', 0.6));
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function saveEdData() {
+            if (currentProject && currentProject.id) {
+                projects = projects.map(p => p.id === currentProject.id ? { ...edData, id: p.id, date: p.date } : p);
+            } else {
+                projects.unshift({ ...edData, id: 'id_' + Date.now(), date: new Date().toLocaleDateString() });
+            }
+            saveProjects();
+            showToast("Guardado con éxito");
+            showView('dashboard');
+            currentProject = null;
+        }
+
+        function renderSettings(container) {
+            container.innerHTML = `
+                <div class="max-w-md mx-auto">
+                    <button onclick="showView('dashboard')" class="text-muted flex items-center mb-6 font-bold hover:opacity-70"><i class="ph ph-arrow-left mr-2"></i> Volver</button>
+                    <div class="p-8 border border-theme rounded-2xl shadow-sm bg-card">
+                        <h2 class="text-2xl font-bold mb-8"><i class="ph ph-gear mr-2"></i> Ajustes</h2>
+                        <form onsubmit="event.preventDefault(); localStorage.setItem('fab_title', document.getElementById('t-input').value); document.getElementById('site-title').textContent = document.getElementById('t-input').value; showToast('Título guardado'); showView('dashboard');">
+                            <label class="block text-sm font-bold mb-2 uppercase tracking-wider text-muted">Título Web</label>
+                            <input id="t-input" value="${document.getElementById('site-title').textContent}" required class="w-full p-2 border-b-2 border-theme text-2xl font-bold bg-transparent focus:outline-none mb-8" />
+                            <button type="submit" class="w-full py-4 rounded-xl font-bold shadow-md bg-accent">Guardar Cambios</button>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
